@@ -1,4 +1,4 @@
-<a>Homepage</a>
+<a>Output in twig</a>
 
 {# ... #}
 <table>
@@ -7,11 +7,11 @@
         <td> <strong> Name  </strong></td>
         <td> <strong> ParentId  </strong></td>
     </tr>
-    {% for element in elements %}
+    {% for item in items %}
         <tr>
-            <td> {{ element.Id }} </td>
-            <td> {{ element.Name }} </td>
-            <td> {{ element.ParentId }} </td>
+            <td> {{ item.Id }} </td>
+            <td> {{ item.Name }} </td>
+            <td> {{ item.ParentId }} </td>
         </tr>
     {% endfor %}
 </table>

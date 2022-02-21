@@ -2,19 +2,23 @@
 
 namespace App\Service;
 
-use App\Repository\TestRepository;
+use App\Dto\TestDto;
 use App\Entity\Test;
+use App\Repository\TestRepository;
 use Doctrine\DBAL\Exception;
 use Dompdf\Dompdf;
 use Fpdf\Fpdf;
 use Twig\Environment;
+use Doctrine\ORM\EntityManagerInterface;
 
 class CreateTreeService
 {
     public $repository;
+    private $entityManager;
     private $twig;
-    public function __construct(TestRepository $repository, Environment $twig){
+    public function __construct(TestRepository $repository, EntityManagerInterface $entityManager, Environment $twig){
         $this->repository = $repository;
+        $this->entityManager = $entityManager;
         $this->twig = $twig;
     }
 
@@ -28,7 +32,7 @@ class CreateTreeService
         if (isset($objects[$parent_id])){
             $dataObjects = [];
             foreach ($objects[$parent_id] as $object){
-                $dataObject = array();
+                $dataObject = [];
                 $dataObject['id'] = $object->getId();
                 $dataObject['parent_id'] = $object->getParentId();
                 $dataObject['name'] = $object->getName();
@@ -43,85 +47,83 @@ class CreateTreeService
 
     public function getTree(): array
     {
-        $elements = $this->repository->findAll();
-
-        if (empty($elements)) {
-            throw new Exception(json_encode(['success'=> false, 'msg' => 'missing items']), 404);
+        $items = $this->repository->findAll();
+        if (empty($items)) {
+            throw new Exception(json_encode(['approved'=> false, 'err' => 'missing items']), 404);
         }
         $objects = [];
-        foreach ($elements as $element) {
-            $objects[$element->getParentId()][] = $element;
+        foreach ($items as $item) {
+            $objects[$item->getParentId()][] = $item;
         }
         return $this->buildTree($objects);
     }
 
-    public function seeTreePdf($parent_id, $level, $tree_text, $objects, $indent)
+    public function newItem(TestDto $dto)
     {
-        //todo: вынести в запрос отступ
-        if (isset($objects[$parent_id])){
-            foreach ($objects[$parent_id] as $object){
-                $tree_text .= str_repeat("-", $level * $indent) . $object->getName() . "<br>";
+        try{
+            $this->entityManager->getConnection()->beginTransaction();
+            $item = new Test();
+            var_dump($dto); ;
+            $item->setParentId($dto->parentid);
+            $item->setName($dto->name);
+
+            $this->entityManager->persist($item);
+            $this->entityManager->flush();
+            $this->entityManager->commit();
+
+            return (['approved' => true, 'message' => 'New item added '.$item->getId()]);
+        } catch (Exception $e){
+            $this->entityManager->rollback();
+            throw $e;
+        }
+    }
+    /**
+     * @param int $parent_id
+     * @param $objects
+     * @param $level
+     * @param $tree_text
+     * @return string
+     */
+    public function seeTreePdf($parentId, $level, $tree, $objects) //Обработка массива
+    {
+
+        if (isset($objects[$parentId])){
+            foreach ($objects[$parentId] as $object){
+                $tree .= "<div style='margin-left:" . ($level * 30) . "px;'>" . $object->getName() . "</div>";
                 $level++;
-                $tree_text .= $this->seeTreePdf($object->getId(), $level, '', $objects, $indent);
+                $tree .= $this->seeTreePdf($object->getId(), $level, '', $objects);
                 $level--;
             }
-            return $tree_text;
+            return $tree;
         } else {
             return '';
         }
     }
-    public function treePdf(int $indent)
+    public function treePdf()
     {
-        $elements = $this->repository->findAll();
-
-        if (empty($elements)) {
-            throw new Exception(json_encode(['success'=> false, 'msg' => 'missing items']), 404);
+        $items = $this->repository->findAll();
+        if (empty($items)) {
+            throw new Exception(json_encode(['approved'=> false, 'err' => 'missing items']), 404);
         }
-
         $objects = array();
-        foreach ($elements as $element) { //Обходим массив
-            $objects[$element->getParentId()][] = $element;
+        foreach ($items as $item) {
+            $objects[$item->getParentId()][] = $item;
         }
-
         $dompdf = new Dompdf();
-        $dompdf->loadHtml($this->seeTreePdf(0, 0, '', $objects, $indent));
+        $dompdf->loadHtml($this->seeTreePdf(0, 0, '', $objects));
         $dompdf->setPaper('A4');
         $dompdf->render();
-
-        return function () use ($dompdf) { $dompdf->stream('Tree.pdf'); };
+        return function () use ($dompdf) { $dompdf->stream('treePdf.pdf'); };
     }
-    public function treeTable()
-    {
-        $elem = $this->repository->findAll();
 
-        if (empty($elements)) {
-            throw new Exception(json_encode(['success'=> false, 'msg' => 'missing items']), 404);
-        }
 
-        $pdf = new Fpdf();
-        $pdf->AddPage();
-        $pdf->SetFont('Arial','B',10);
-        $pdf->Cell(30,7,'id', 1);
-        $pdf->Cell(30,7,'name', 1);
-        $pdf->Cell(30,7,'parentId', 1);
-        $pdf->Ln();
-        foreach ($elem as $row){
-            $pdf->Cell(30,7,$row->getId(), 1);
-            $pdf->Cell(30,7,$row->getName(), 1);
-            $pdf->Cell(30,7,$row->getParentId(), 1);
-            $pdf->Ln();
-        }
-        return $pdf->Output('D', 'doc.pdf');
-    }
     public function treeTableDompdf(){
-        $elements = $this->repository->findAll();
-
-        if (empty($elements)) {
-            throw new Exception(json_encode(['success'=> false, 'msg' => 'missing items']), 404);
+        $items = $this->repository->findAll();
+        if (empty($items)) {
+            throw new Exception(json_encode(['approved'=> false, 'err' => 'missing items']), 404);
         }
-        $html = $this->twig->render('pdf.html.twig', ['elements' => $elements]);
+        $html = $this->twig->render('pdf.html.twig', ['items' => $items]);
         $dompdf = new DOMPDF();
-
         $dompdf->loadhtml($html);
         $dompdf->render();
         return function () use ($dompdf) { $dompdf->stream('Table.pdf'); };
